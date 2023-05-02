@@ -1,42 +1,25 @@
-FROM ubuntu:trusty
+FROM mcr.microsoft.com/dotnet/core/sdk:3.1 AS build
 
-MAINTAINER Miguel González <mgonzalez@codicefactory.com>
+WORKDIR /app
 
-RUN apt-get update
-RUN apt-get install -y wget
+# Install PlasticSCM CLI
+RUN apt-get update && apt-get install -y --no-install-recommends curl gpg && \
+    curl https://www.plasticscm.com/plasticrepo/stable/5.4.16.824/plasticscm5-client.tar.gz -o plasticscm.tar.gz && \
+    curl https://www.plasticscm.com/plasticrepo/stable/5.4.16.824/plasticscm5-client.tar.gz.sig -o plasticscm.tar.gz.sig && \
+    gpg --no-default-keyring --keyring gnupg-ring:/etc/apt/trusted.gpg.d/plasticscm.gpg --import /plasticscmpublickey.asc && \
+    gpg --verify plasticscm.tar.gz.sig plasticscm.tar.gz && \
+    tar zxvf plasticscm.tar.gz && \
+    rm -rf /var/lib/apt/lists/* /plasticscmpublickey.asc
 
-RUN mkdir /conf
-RUN mkdir /logs
-RUN mkdir -p /db/sqlite
+# Copy your Plastic SCM repository (optional)
+COPY .plastic /app/.plastic
 
-RUN echo "deb http://www.plasticscm.com/plasticrepo/5.0/Ubuntu_14.04/ ./" >> /etc/apt/sources.list.d/plastic.list
-RUN echo "deb http://www.plasticscm.com/plasticrepo/5.4/Ubuntu_14.04/ ./" >> /etc/apt/sources.list.d/plastic.list
-RUN wget -q http://www.plasticscm.com/plasticrepo/5.0/Ubuntu_14.04/Release.key -O - | apt-key add -
-RUN wget -q http://www.plasticscm.com/plasticrepo/5.4/Ubuntu_14.04/Release.key -O - | apt-key add -
+# Set Plastic SCM variables
+ENV PATH="/app/plasticscm5-client:${PATH}"
+ENV PLASTIC_HOME="/app/plasticscm5-client"
+ENV PLASTIC_CONFIGDIR="/app/.plastic"
 
-RUN DEBIAN_FRONTEND=noninteractive apt-get -q update && apt-get install -y -q plasticscm-client plasticscm-server && plasticsd stop
-
-RUN { \
-    clconfigureserver --language=en --port=8087 --workingmode=UPWorkingMode; \
-    [ -f /opt/plasticscm5/server/users.conf ] && mv /opt/plasticscm5/server/users.conf /conf || touch /conf/users.conf; \
-    [ -f /opt/plasticscm5/server/groups.conf ] && mv /opt/plasticscm5/server/groups.conf /conf || touch /conf/groups.conf; \
-    mv /opt/plasticscm5/server/plasticd.lic /conf; \
-    ln -s /conf/users.conf /opt/plasticscm5/server && ln -s /conf/groups.conf /opt/plasticscm5/server; \
-    ln -s /conf/plasticd.lic /opt/plasticscm5/server; \
-    ln -s /conf/plasticd.token.lic /opt/plasticscm5/server; \
-}
-
-RUN umtool cu root root
-RUN umtool cg administrators
-RUN umtool autg root administrators
-
-ADD loader.log.conf /opt/plasticscm5/server/
-ADD db.conf /opt/plasticscm5/server/
-
-EXPOSE 8087
-
-VOLUME /conf
-VOLUME /db/sqlite
-VOLUME /logs
-
-CMD ["/opt/plasticscm5/server/plasticd", "--daemon"]
+# Set up entrypoint command
+COPY entrypoint.sh /app
+RUN chmod +x entrypoint.sh
+ENTRYPOINT ["/app/entrypoint.sh"]
